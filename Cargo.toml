@@ -3,8 +3,12 @@ name = "ucp-local"
 version = "0.1.0"
 edition = "2024"
 description = "Universal Context Pipeline — local-first MCP server for grounding LLMs in your files"
-license = "MIT OR Apache-2.0"
+license = "Apache-2.0"
 readme = "README.md"
+repository = "https://github.com/akshay2211/universal-context-pipeline"
+homepage = "https://ak1.io/universal-context-pipeline"
+keywords = ["mcp", "rag", "llm", "local-first", "search"]
+categories = ["command-line-utilities", "database"]
 
 [[bin]]
 name = "ucp-local"

@@ -102,7 +102,7 @@ impl Default for Config {
 
 impl Config {
     fn dirs() -> Result<ProjectDirs> {
-        ProjectDirs::from("io", "ucp", "ucp").context("could not resolve user dirs")
+        ProjectDirs::from("io", "ak1", "ucp-local").context("could not resolve user dirs")
     }
 
     pub fn config_path() -> Result<PathBuf> {

@@ -23,10 +23,23 @@ pub struct OllamaClient {
 
 impl OllamaClient {
     pub fn new(host: impl Into<String>, model: impl Into<String>) -> Self {
+        // Default to IPv4 if the host is the textual "localhost" — Ollama only
+        // binds to IPv4 by default, so an IPv6 first-try would just stall.
+        let raw = host.into();
+        let host = raw
+            .trim_end_matches('/')
+            .replace("localhost", "127.0.0.1");
         Self {
-            host: host.into().trim_end_matches('/').to_string(),
+            host,
             model: model.into(),
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                // Fail fast (~2s) when Ollama isn't running, instead of hanging.
+                .connect_timeout(std::time::Duration::from_secs(2))
+                // Generous overall — chat completions on a large model can take
+                // a while, especially on first call when the model is cold.
+                .timeout(std::time::Duration::from_secs(600))
+                .build()
+                .expect("building reqwest client"),
         }
     }
 
@@ -195,8 +208,9 @@ mod tests {
     #[test]
     fn ollama_client_normalizes_host_and_constructs_payload() {
         // Exercises the constructor path and the request body shape without making a network call.
+        // `localhost` is rewritten to 127.0.0.1 so we don't pay the IPv6 first-try delay.
         let client = OllamaClient::new("http://localhost:11434/", "nomic-embed-text");
-        assert_eq!(client.host, "http://localhost:11434");
+        assert_eq!(client.host, "http://127.0.0.1:11434");
         assert_eq!(client.model, "nomic-embed-text");
 
         let body = EmbeddingRequest { model: client.model(), prompt: "hello" };
@@ -206,10 +220,21 @@ mod tests {
     }
 
     #[test]
-    fn ollama_client_default_local_uses_localhost() {
+    fn ollama_client_default_local_uses_ipv4() {
         let client = OllamaClient::default_local();
-        assert_eq!(client.host, "http://localhost:11434");
+        // default_local() takes "http://localhost:11434" which the constructor
+        // rewrites to 127.0.0.1 to avoid the IPv6 stall.
+        assert_eq!(client.host, "http://127.0.0.1:11434");
         assert_eq!(client.model, "nomic-embed-text");
+    }
+
+    #[test]
+    fn ollama_client_passes_through_non_localhost_hosts() {
+        let client = OllamaClient::new("http://192.168.1.5:11434", "x");
+        assert_eq!(client.host, "http://192.168.1.5:11434");
+
+        let client = OllamaClient::new("http://ollama.lan:11434", "x");
+        assert_eq!(client.host, "http://ollama.lan:11434");
     }
 
     #[test]

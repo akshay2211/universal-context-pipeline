@@ -12,29 +12,32 @@ Set FontSize 18
 Set Width 1280
 Set Height 760
 Set Theme "Catppuccin Mocha"
-Set PlaybackSpeed 1.0
+Set PlaybackSpeed 0.5
 Set TypingSpeed 55ms
 
 Type "# Install once. Index a folder. Ask a question."
-Sleep 1.5s
+Sleep 2.5s
 Ctrl+U
 
 # Step 1 — install (faked for the demo; real installs are obvious)
 Type "# 1. Install (one-time)"
-Sleep 200ms
+Sleep 2s
 Enter
-Type "brew install ollama poppler"
+Enter
+Type "# brew install poppler ollama"
 Sleep 400ms
 Enter
 Sleep 1.2s
-Type "ollama pull nomic-embed-text llama3.2"
+Type "# ollama pull nomic-embed-text llama3.2"
 Sleep 400ms
 Enter
-Sleep 1.5s
-Type "cargo install ucp-local"
-Sleep 400ms
+Sleep 1.2s
 Enter
 Sleep 1.5s
+Type "# cargo install ucp-local"
+Sleep 400ms
+Enter
+Sleep 3.5s
 Ctrl+L
 
 # Step 2 — index
@@ -42,18 +45,20 @@ Type "# 2. Index a folder"
 Sleep 200ms
 Enter
 Type "ucp-local index samples/notes samples/code"
-Sleep 400ms
+Sleep 2s
 Enter
-Sleep 5s
+Sleep 6s
 
 # Step 3 — ask
 Ctrl+L
 Type "# 3. Ask a question — grounded answer with citations"
-Sleep 200ms
+Sleep 2s
+Enter
 Enter
 Type "ucp-local ask 'how should I handle errors in a Rust CLI?'"
-Sleep 800ms
+Sleep 2s
 Enter
-Sleep 9s
+Enter
+Sleep 10s
 
-Sleep 3s
+Sleep 10s

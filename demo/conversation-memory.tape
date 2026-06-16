@@ -9,7 +9,7 @@ Set FontSize 18
 Set Width 1280
 Set Height 720
 Set Theme "Catppuccin Mocha"
-Set PlaybackSpeed 1.0
+Set PlaybackSpeed 0.5
 Set TypingSpeed 60ms
 
 # A subtle title comment via shell echo
@@ -26,6 +26,7 @@ Sleep 1.5s
 # Ingest the export — progress bar visible
 Type "ucp-local ingest-conversations samples/conversations/claude-conversations.json"
 Sleep 500ms
+Enter
 Enter
 Sleep 4s
 
