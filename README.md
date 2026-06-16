@@ -1,8 +1,7 @@
 # UCP — Universal Context Pipeline
 
-[![crates.io](https://img.shields.io/crates/v/ucp-local.svg)](https://crates.io/crates/ucp-local)
+[![crates.io](https://img.shields.io/badge/crates.io-ucp_local-yellow.svg)](https://crates.io/crates/ucp-local)
 [![docs.rs](https://docs.rs/ucp-local/badge.svg)](https://docs.rs/ucp-local)
-[![license](https://img.shields.io/crates/l/ucp-local.svg)](#license)
 
 A local-first MCP server that grounds LLMs in your own files.
 
