@@ -1,16 +1,17 @@
 [package]
-name = "ucp"
+name = "ucp-local"
 version = "0.1.0"
 edition = "2024"
 description = "Universal Context Pipeline — local-first MCP server for grounding LLMs in your files"
 license = "MIT OR Apache-2.0"
+readme = "README.md"
 
 [[bin]]
-name = "ucp"
+name = "ucp-local"
 path = "src/main.rs"
 
 [lib]
-name = "ucp"
+name = "ucp_local"
 path = "src/lib.rs"
 
 [dependencies]
@@ -41,6 +42,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 async-trait = "0.1"
 walkdir = "2"
 pdf-extract = "0.7"
+indicatif = "0.17"
 
 # Week 3
 notify = "6"

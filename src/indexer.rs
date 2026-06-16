@@ -1,3 +1,4 @@
+use crate::config::PdfConfig;
 use crate::embeddings::{Embedder, EmbeddingCache};
 use crate::ingestion::{chunk_file, Chunk, MaskingEngine};
 use crate::storage::VectorStore;
@@ -11,11 +12,17 @@ pub struct IndexOptions {
     pub no_mask: bool,
     pub max_tokens: usize,
     pub overlap_sentences: usize,
+    pub pdf: PdfConfig,
 }
 
 impl Default for IndexOptions {
     fn default() -> Self {
-        Self { no_mask: false, max_tokens: 512, overlap_sentences: 1 }
+        Self {
+            no_mask: false,
+            max_tokens: 512,
+            overlap_sentences: 1,
+            pdf: PdfConfig::default(),
+        }
     }
 }
 
@@ -28,17 +35,57 @@ pub struct IndexStats {
     pub embed_calls: usize,
 }
 
+/// Events emitted while indexing. The CLI binds these to an `indicatif`
+/// progress bar; the library stays UI-agnostic. Tests pass `None`.
+pub enum IndexEvent<'a> {
+    /// About to start a logical unit (one file, or one conversation export).
+    Start { path: &'a Path, total_units: Option<usize>, unit_number: usize },
+    /// Finished a unit. `chunks_added` is what landed in the store for that unit.
+    Finish { path: &'a Path, chunks_added: usize },
+    /// One chunk processed (embedded or cache hit). Useful for secondary counters.
+    Chunk { from_cache: bool },
+}
+
+pub type ProgressFn<'a> = dyn Fn(IndexEvent<'_>) + Send + Sync + 'a;
+
+/// Pre-walk a path and count supported files. Used to seed the progress bar's
+/// "total" count. Cheap relative to indexing itself (no reads, just stat).
+pub fn count_indexable_files(root: &Path) -> usize {
+    if root.is_file() {
+        return if is_supported(root) { 1 } else { 0 };
+    }
+    WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| !is_ignored_entry(e))
+        .filter_map(|r| r.ok())
+        .filter(|e| e.file_type().is_file() && is_supported(e.path()))
+        .count()
+}
+
 pub async fn index_path<E: Embedder>(
     root: &Path,
     store: &mut VectorStore,
     embedder: &E,
     opts: &IndexOptions,
+    progress: Option<&ProgressFn<'_>>,
 ) -> Result<IndexStats> {
     let mut stats = IndexStats::default();
+    let total_units = progress.map(|_| count_indexable_files(root));
 
     if root.is_file() {
         if is_supported(root) {
-            index_one_file(root, store, embedder, opts, &mut stats).await?;
+            if let Some(cb) = progress {
+                cb(IndexEvent::Start { path: root, total_units, unit_number: 1 });
+            }
+            let before = stats.chunks_inserted;
+            index_one_file(root, store, embedder, opts, &mut stats, progress).await?;
+            if let Some(cb) = progress {
+                cb(IndexEvent::Finish {
+                    path: root,
+                    chunks_added: stats.chunks_inserted - before,
+                });
+            }
         } else {
             stats.files_skipped += 1;
         }
@@ -50,6 +97,7 @@ pub async fn index_path<E: Embedder>(
         .into_iter()
         .filter_entry(|e| !is_ignored_entry(e));
 
+    let mut unit_number = 0usize;
     for entry in walker {
         let entry = entry.context("walking directory")?;
         if !entry.file_type().is_file() {
@@ -59,7 +107,18 @@ pub async fn index_path<E: Embedder>(
             stats.files_skipped += 1;
             continue;
         }
-        index_one_file(entry.path(), store, embedder, opts, &mut stats).await?;
+        unit_number += 1;
+        if let Some(cb) = progress {
+            cb(IndexEvent::Start { path: entry.path(), total_units, unit_number });
+        }
+        let before = stats.chunks_inserted;
+        index_one_file(entry.path(), store, embedder, opts, &mut stats, progress).await?;
+        if let Some(cb) = progress {
+            cb(IndexEvent::Finish {
+                path: entry.path(),
+                chunks_added: stats.chunks_inserted - before,
+            });
+        }
     }
     Ok(stats)
 }
@@ -70,17 +129,26 @@ pub async fn index_one_file<E: Embedder>(
     embedder: &E,
     opts: &IndexOptions,
     stats: &mut IndexStats,
+    progress: Option<&ProgressFn<'_>>,
 ) -> Result<()> {
-    let raw = read_file_text(path)?;
+    let raw = read_file_text(path, &opts.pdf)?;
     let mtime = file_mtime(path);
 
     let cleaned = if opts.no_mask { raw } else { MaskingEngine::clean(&raw) };
     let chunks = chunk_file(path, &cleaned, opts.max_tokens, opts.overlap_sentences);
 
+    if chunks.is_empty() {
+        tracing::warn!(
+            path = %path.display(),
+            extracted_bytes = cleaned.len(),
+            "no chunks produced — extraction returned no usable text"
+        );
+    }
+
     // Re-index semantics: drop existing chunks for this file before inserting new ones.
     store.delete_chunks_for_path(path)?;
 
-    embed_and_store(chunks, mtime, store, embedder, stats).await?;
+    embed_and_store(chunks, mtime, store, embedder, stats, progress).await?;
     stats.files_processed += 1;
     Ok(())
 }
@@ -94,9 +162,10 @@ pub async fn index_chunks<E: Embedder>(
     mtime: i64,
     store: &mut VectorStore,
     embedder: &E,
+    progress: Option<&ProgressFn<'_>>,
 ) -> Result<IndexStats> {
     let mut stats = IndexStats::default();
-    embed_and_store(chunks, mtime, store, embedder, &mut stats).await?;
+    embed_and_store(chunks, mtime, store, embedder, &mut stats, progress).await?;
     Ok(stats)
 }
 
@@ -106,26 +175,31 @@ async fn embed_and_store<E: Embedder>(
     store: &mut VectorStore,
     embedder: &E,
     stats: &mut IndexStats,
+    progress: Option<&ProgressFn<'_>>,
 ) -> Result<()> {
     for chunk in chunks {
         let hash = EmbeddingCache::hash(&chunk.text);
-        let embedding = match store.find_cached_embedding(&hash)? {
+        let (embedding, from_cache) = match store.find_cached_embedding(&hash)? {
             Some(e) => {
                 stats.cache_hits += 1;
-                e
+                (e, true)
             }
             None => {
                 stats.embed_calls += 1;
-                embedder
+                let e = embedder
                     .embed(&chunk.text)
                     .await
                     .with_context(|| {
                         format!("embedding chunk from {}", chunk.source.file_path.display())
-                    })?
+                    })?;
+                (e, false)
             }
         };
         store.insert_chunk(&chunk, &hash, &embedding, mtime)?;
         stats.chunks_inserted += 1;
+        if let Some(cb) = progress {
+            cb(IndexEvent::Chunk { from_cache });
+        }
     }
     Ok(())
 }
@@ -139,13 +213,64 @@ fn file_mtime(path: &Path) -> i64 {
         .unwrap_or(0)
 }
 
-fn read_file_text(path: &Path) -> Result<String> {
+fn read_file_text(path: &Path, pdf: &PdfConfig) -> Result<String> {
     if is_pdf(path) {
-        pdf_extract::extract_text(path)
-            .with_context(|| format!("extracting PDF text from {}", path.display()))
+        extract_pdf_text(path, pdf)
     } else {
         std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))
     }
+}
+
+fn extract_pdf_text(path: &Path, pdf: &PdfConfig) -> Result<String> {
+    let primary = pdf_extract::extract_text(path);
+    let primary_text = primary.unwrap_or_default();
+    if primary_text.trim().len() >= pdf.min_useful_bytes {
+        return Ok(primary_text);
+    }
+
+    tracing::info!(
+        path = %path.display(),
+        primary_len = primary_text.trim().len(),
+        "pdf-extract produced little/no text; trying pdftotext fallback"
+    );
+
+    match pdftotext_extract(path, &pdf.pdftotext_command) {
+        Ok(text) if text.trim().len() >= pdf.min_useful_bytes => Ok(text),
+        Ok(empty) => {
+            tracing::warn!(
+                path = %path.display(),
+                pdftotext_len = empty.trim().len(),
+                "pdftotext also produced little/no text — PDF may be image-only (scanned) or have a broken text layer; consider `ocrmypdf --redo-ocr <file>`"
+            );
+            Ok(if primary_text.is_empty() { empty } else { primary_text })
+        }
+        Err(e) => {
+            tracing::warn!(
+                path = %path.display(),
+                error = %e,
+                "pdftotext fallback unavailable; install poppler (`brew install poppler`) for better PDF support"
+            );
+            Ok(primary_text)
+        }
+    }
+}
+
+fn pdftotext_extract(path: &Path, command: &str) -> Result<String> {
+    use std::process::Command;
+    let output = Command::new(command)
+        .arg("-layout")
+        .arg(path)
+        .arg("-") // write to stdout
+        .output()
+        .with_context(|| format!("spawning {command}"))?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "{command} exited {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 fn is_pdf(path: &Path) -> bool {
@@ -192,7 +317,7 @@ pub fn is_supported(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::EMBEDDING_DIM;
+    use crate::storage::DEFAULT_EMBEDDING_DIM;
     use async_trait::async_trait;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -215,8 +340,8 @@ mod tests {
         async fn embed(&self, text: &str) -> Result<Vec<f32>> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             // Deterministic per-text vector so distinct chunks get distinct embeddings.
-            let mut v = vec![0.0f32; EMBEDDING_DIM];
-            let idx = (text.bytes().map(|b| b as usize).sum::<usize>()) % EMBEDDING_DIM;
+            let mut v = vec![0.0f32; DEFAULT_EMBEDDING_DIM];
+            let idx = (text.bytes().map(|b| b as usize).sum::<usize>()) % DEFAULT_EMBEDDING_DIM;
             v[idx] = 1.0;
             Ok(v)
         }
@@ -239,7 +364,7 @@ mod tests {
 
         let mut store = VectorStore::open_in_memory().unwrap();
         let embedder = CountingEmbedder::new();
-        let stats = index_path(tmp.path(), &mut store, &embedder, &IndexOptions::default())
+        let stats = index_path(tmp.path(), &mut store, &embedder, &IndexOptions::default(), None)
             .await
             .unwrap();
 
@@ -257,14 +382,14 @@ mod tests {
 
         let mut store = VectorStore::open_in_memory().unwrap();
         let embedder = CountingEmbedder::new();
-        let first = index_path(tmp.path(), &mut store, &embedder, &IndexOptions::default())
+        let first = index_path(tmp.path(), &mut store, &embedder, &IndexOptions::default(), None)
             .await
             .unwrap();
         let calls_after_first = embedder.calls();
         assert_eq!(first.cache_hits, 0);
         assert!(calls_after_first > 0);
 
-        let second = index_path(tmp.path(), &mut store, &embedder, &IndexOptions::default())
+        let second = index_path(tmp.path(), &mut store, &embedder, &IndexOptions::default(), None)
             .await
             .unwrap();
         // Identical content → every chunk's hash should hit the cache.
@@ -283,7 +408,7 @@ mod tests {
 
         let mut store = VectorStore::open_in_memory().unwrap();
         let embedder = CountingEmbedder::new();
-        let stats = index_path(tmp.path(), &mut store, &embedder, &IndexOptions::default())
+        let stats = index_path(tmp.path(), &mut store, &embedder, &IndexOptions::default(), None)
             .await
             .unwrap();
 
@@ -297,7 +422,7 @@ mod tests {
 
         let mut store = VectorStore::open_in_memory().unwrap();
         let embedder = CountingEmbedder::new();
-        let stats = index_path(&file, &mut store, &embedder, &IndexOptions::default())
+        let stats = index_path(&file, &mut store, &embedder, &IndexOptions::default(), None)
             .await
             .unwrap();
 

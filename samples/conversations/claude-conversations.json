@@ -1,0 +1,144 @@
+[
+  {
+    "name": "Kafka consumer rebalancing tradeoffs",
+    "created_at": "2025-10-14T09:12:00Z",
+    "chat_messages": [
+      {
+        "sender": "human",
+        "text": "What actually triggers a Kafka consumer rebalance in 2.x? I keep seeing pauses in our consumer group and I want to understand what's causing them."
+      },
+      {
+        "sender": "assistant",
+        "text": "Rebalance is triggered by any change to consumer group membership or topic-partition mapping. Common causes in production: (1) a consumer's session.timeout.ms expires because heartbeats stopped — usually GC pause or network blip; (2) max.poll.interval.ms exceeded because the consumer's processing loop took too long between poll() calls; (3) a new consumer joins or an existing one leaves cleanly; (4) partition count changes on the topic. If you're seeing pauses, the first thing to check is whether max.poll.interval.ms is being hit — that's the most common cause of self-inflicted rebalances in slow consumers."
+      },
+      {
+        "sender": "human",
+        "text": "How do I tell which one is happening?"
+      },
+      {
+        "sender": "assistant",
+        "text": "Three signals to look at: (1) consumer logs at INFO will say `Member ... sending LeaveGroup request` if it left voluntarily, or `Marking the coordinator dead` if the broker side decided it was gone. (2) Look at the broker's __consumer_offsets log — the group coordinator logs which member triggered the rebalance and why. (3) JMX metrics on the consumer side: `records-lag-max`, `last-poll-seconds-ago`, `commit-latency-avg`. If last-poll-seconds-ago is climbing toward max.poll.interval.ms, your processing is too slow and you should either reduce max.poll.records or move processing into a separate thread pool."
+      },
+      {
+        "sender": "human",
+        "text": "We have max.poll.records at 500 and our processing per message averages 80ms. Is that a problem?"
+      },
+      {
+        "sender": "assistant",
+        "text": "Yes, mathematically. 500 records × 80ms = 40 seconds per poll cycle in the worst case. Default max.poll.interval.ms is 5 minutes so you're well under that, but you have no margin: a GC pause or a slow downstream call would tip you over. Two solid fixes: (a) reduce max.poll.records to 100, which caps the worst-case loop time at 8 seconds; or (b) decouple polling from processing — have the polling thread enqueue into a bounded queue, with worker threads draining. Option (b) is what most production consumers eventually move to."
+      },
+      {
+        "sender": "human",
+        "text": "What's the catch with the bounded queue approach?"
+      },
+      {
+        "sender": "assistant",
+        "text": "Two real catches. First, you have to handle backpressure: if workers fall behind, the polling thread can't keep polling or you'll OOM. The standard fix is to call consumer.pause() when the queue fills and consumer.resume() when it drains below a threshold. Second, manual offset commits get harder. You can't commit until the worker has actually finished processing the record, so you need a way to track which offsets are still in-flight. Most implementations maintain a per-partition map of {offset: completion_state} and only commit a contiguous prefix of completed offsets. The Confluent Java client has a `KafkaConsumerWithThreadPool` example that's a reasonable starting point."
+      },
+      {
+        "sender": "human",
+        "text": "Got it. Switching gears — is there any way to make rebalances *less disruptive* when they do happen?"
+      },
+      {
+        "sender": "assistant",
+        "text": "Yes — incremental cooperative rebalancing, introduced in 2.4 and the default since 3.0 if you opt in via partition.assignment.strategy = CooperativeStickyAssignor. The old eager protocol revoked ALL partitions on every rebalance and reassigned from scratch (5-30 second stop-the-world). Cooperative only revokes the partitions that are actually moving to another consumer. Most rebalances become near-zero downtime. The main caveat: all consumers in the group have to be on the cooperative protocol — mixed mode falls back to eager. Worth the rolling deploy to switch."
+      }
+    ]
+  },
+  {
+    "name": "Postgres VACUUM tuning for a 200M row table",
+    "created_at": "2025-11-02T16:30:00Z",
+    "chat_messages": [
+      {
+        "sender": "human",
+        "text": "I have a 200M row events table that gets ~5M updates a day. Autovacuum doesn't seem to be running on it. What should I set?"
+      },
+      {
+        "sender": "assistant",
+        "text": "On a table that size, the default autovacuum_vacuum_scale_factor of 0.2 means it won't run until 40M rows are dead — and on a write-heavy table, by then your bloat is already noticeable. Set this per-table aggressively: ALTER TABLE events SET (autovacuum_vacuum_scale_factor = 0.01, autovacuum_vacuum_threshold = 10000); That triggers vacuum after about 2M dead tuples instead of 40M. Also bump autovacuum_vacuum_cost_limit globally to 2000 (default 200) so the vacuum process doesn't throttle itself into uselessness — assuming you're on SSD with IOPS to spare."
+      },
+      {
+        "sender": "human",
+        "text": "How do I check if it's actually working?"
+      },
+      {
+        "sender": "assistant",
+        "text": "Two queries. First, `SELECT relname, n_dead_tup, n_live_tup, last_autovacuum FROM pg_stat_user_tables WHERE relname = 'events';` — n_dead_tup should stay reasonably low (under ~5% of n_live_tup) and last_autovacuum should advance regularly. Second, for actual bloat: `CREATE EXTENSION IF NOT EXISTS pgstattuple; SELECT * FROM pgstattuple_approx('events');` — dead_tuple_percent over 20% means autovacuum is still losing. If both indicate you're losing the race even with aggressive settings, the next step is to investigate whether you have long-running transactions holding the xmin horizon back — autovacuum can't reclaim dead tuples newer than the oldest snapshot."
+      }
+    ]
+  },
+  {
+    "name": "macOS code signing for a Rust CLI",
+    "created_at": "2025-12-08T11:45:00Z",
+    "chat_messages": [
+      {
+        "sender": "human",
+        "text": "I'm shipping a Rust CLI to mac users. Do I need to code-sign it? They keep getting 'cannot verify developer' warnings."
+      },
+      {
+        "sender": "assistant",
+        "text": "Yes, for any decent user experience. The progression: (1) ad-hoc signing (`codesign --sign - binary`) — gets rid of some warnings on Apple Silicon but not Gatekeeper. (2) Developer ID signing — requires an Apple Developer Program membership ($99/year) and a Developer ID Application certificate. Sign with `codesign --sign 'Developer ID Application: Your Name (TEAMID)' --options runtime binary`. (3) Notarization — required for binaries distributed outside the App Store on macOS 10.15+. Submit via `xcrun notarytool submit binary.zip --keychain-profile <profile> --wait`, then staple with `xcrun stapler staple binary`. Without (3), users will see the 'cannot be opened because Apple cannot check it for malicious software' dialog."
+      },
+      {
+        "sender": "human",
+        "text": "Is there a way to skip the Apple Developer fee for an open source tool?"
+      },
+      {
+        "sender": "assistant",
+        "text": "Three honest options. (a) Distribute via Homebrew — once your formula is in homebrew-core or a tap, brew installs the binary without Gatekeeper checks because brew is itself signed. Most popular Rust CLIs (ripgrep, fd, eza) take this route. (b) Tell users to right-click → Open the first time, which bypasses the warning permanently per-app. Fine for technical audiences, annoying for everyone else. (c) Just pay the $99 — it covers all your binaries for the year and lets you ship a polished installer. For a real product launch, (c). For a github-only side project, (a) is what most people do."
+      }
+    ]
+  },
+  {
+    "name": "Designing a Rust macro for derive-style API",
+    "created_at": "2026-01-22T14:20:00Z",
+    "chat_messages": [
+      {
+        "sender": "human",
+        "text": "I want to write a derive macro for my crate. Procedural macros require a separate proc-macro crate, right?"
+      },
+      {
+        "sender": "assistant",
+        "text": "Yes. proc-macros must live in a crate with `[lib] proc-macro = true` in Cargo.toml, and that crate can ONLY export proc macros — no normal items. The standard pattern is a workspace with `my_crate` (the main crate users depend on) and `my_crate_derive` (the proc-macro crate). Users still just `use my_crate::MyDerive;` because `my_crate` re-exports from `my_crate_derive`. This split is a Rust language constraint, not a stylistic choice."
+      },
+      {
+        "sender": "human",
+        "text": "What's the difference between syn 1 and syn 2? I'm reading old examples."
+      },
+      {
+        "sender": "assistant",
+        "text": "syn 2 (released 2023) made several breaking changes: parsers now return Result everywhere instead of panicking on bad input, the AST types are simplified (Type::Path collapsed some variants), and Attribute::parse_meta is gone — you use attribute.meta directly. Most importantly, syn 2 uses proc-macro2's `TokenStream` consistently instead of mixing std proc_macro::TokenStream and proc_macro2 versions. If you're starting fresh, go syn 2. If you're maintaining a macro that uses syn 1, migration is tedious but mechanical — the syn changelog has a section listing every breaking change."
+      },
+      {
+        "sender": "human",
+        "text": "Any best practices for error messages in proc macros?"
+      },
+      {
+        "sender": "assistant",
+        "text": "Three things make proc-macro errors not awful: (1) Always emit errors via `syn::Error::new_spanned(token, message)` rather than `panic!()`. Spanned errors point the compiler at the right token in the user's code; panics show a useless internal stack trace. (2) Aggregate multiple errors rather than bailing on the first. The pattern is to collect `Vec<syn::Error>` while traversing and combine them at the end with `Error::combine`. (3) When generating code, include `#[allow(...)]` for warnings your generated code might trip — users will hate you if every derive triggers unused_imports."
+      }
+    ]
+  },
+  {
+    "name": "Setting up SSO for a small startup",
+    "created_at": "2026-02-15T09:00:00Z",
+    "chat_messages": [
+      {
+        "sender": "human",
+        "text": "We're a 15-person startup and customers are asking for SSO. What's the cheapest path to SAML?"
+      },
+      {
+        "sender": "assistant",
+        "text": "Cheapest realistic path depends on whether you want to build it or buy it. Build: WorkOS or Auth0 SSO add-on, both charge per-SSO-customer, roughly $125-200/customer/month. Wires up in a day. Buy: Okta Workforce Identity is heavier and overkill at your size. For a 15-person team adding SSO for 2-3 enterprise customers, WorkOS is the standard answer right now — they handle the SAML/OIDC complexity and you get a normal OAuth-shaped API on your side."
+      },
+      {
+        "sender": "human",
+        "text": "What about SCIM for user provisioning?"
+      },
+      {
+        "sender": "assistant",
+        "text": "SCIM is usually a separate request from enterprise buyers — they want their HR system to auto-provision/deprovision users in your app. WorkOS also handles SCIM, same per-customer pricing model. The implementation cost on your side is mostly figuring out what to do with users that get deprovisioned mid-session (revoke immediately? grace period?) and how to handle group/role mappings. Plan for a week of work to build the receiving side once."
+      }
+    ]
+  }
+]

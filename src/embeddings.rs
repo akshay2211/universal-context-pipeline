@@ -62,6 +62,55 @@ impl OllamaClient {
             .context("decoding ollama embeddings response")?;
         Ok(parsed.embedding)
     }
+
+    /// Non-streaming chat completion. Used by `ucp ask`.
+    pub async fn chat(&self, model: &str, messages: &[ChatMessage<'_>]) -> Result<String> {
+        let url = format!("{}/api/chat", self.host);
+        let body = ChatRequest { model, messages, stream: false };
+
+        let res = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .with_context(|| format!("POST {url}"))?;
+
+        if !res.status().is_success() {
+            let status = res.status();
+            let text = res.text().await.unwrap_or_default();
+            anyhow::bail!("ollama {status}: {text}");
+        }
+
+        let parsed: ChatResponse = res
+            .json()
+            .await
+            .context("decoding ollama chat response")?;
+        Ok(parsed.message.content)
+    }
+}
+
+#[derive(Serialize)]
+pub struct ChatMessage<'a> {
+    pub role: &'a str,
+    pub content: &'a str,
+}
+
+#[derive(Serialize)]
+struct ChatRequest<'a> {
+    model: &'a str,
+    messages: &'a [ChatMessage<'a>],
+    stream: bool,
+}
+
+#[derive(Deserialize)]
+struct ChatResponse {
+    message: ChatResponseMessage,
+}
+
+#[derive(Deserialize)]
+struct ChatResponseMessage {
+    content: String,
 }
 
 #[derive(Serialize)]
@@ -161,5 +210,19 @@ mod tests {
         let client = OllamaClient::default_local();
         assert_eq!(client.host, "http://localhost:11434");
         assert_eq!(client.model, "nomic-embed-text");
+    }
+
+    #[test]
+    fn chat_payload_shape() {
+        let msgs = [
+            ChatMessage { role: "system", content: "be concise" },
+            ChatMessage { role: "user", content: "hello" },
+        ];
+        let body = ChatRequest { model: "llama3.2", messages: &msgs, stream: false };
+        let json = serde_json::to_string(&body).unwrap();
+        assert!(json.contains("\"model\":\"llama3.2\""));
+        assert!(json.contains("\"stream\":false"));
+        assert!(json.contains("\"role\":\"system\""));
+        assert!(json.contains("\"content\":\"hello\""));
     }
 }

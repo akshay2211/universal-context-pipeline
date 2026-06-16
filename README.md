@@ -6,7 +6,9 @@ UCP indexes folders on your machine — notes, code, conversation exports — an
 
 ## Status
 
-v0.1, headless. Track scope in [ROADMAP.md](ROADMAP.md). What ships:
+v0.1, headless. Track scope in [ROADMAP.md](ROADMAP.md). Who this is for and how it compares to existing tools: [POSITIONING.md](POSITIONING.md).
+
+What ships:
 
 - Hybrid search: SQLite FTS5 (BM25) ⨉ `sqlite-vec` (ANN) merged via reciprocal-rank fusion.
 - Tree-sitter chunking for Rust, Python, TypeScript/JavaScript. Heading-aware Markdown. Sentence-bounded prose fallback.
@@ -24,40 +26,103 @@ What's not in v0.1:
 
 ## Prerequisites
 
-- Rust (stable, edition 2024).
-- [Ollama](https://ollama.ai) running locally with an embedding model:
-  ```bash
-  ollama pull nomic-embed-text
-  ```
+UCP needs three things on your machine: Rust (to build), Ollama (to embed and optionally chat), and Poppler (for robust PDF text extraction — recommended).
 
-## Install (from source)
+### macOS
 
 ```bash
-git clone <repo-url> ucp
-cd ucp
-cargo build --release
-# Binary at target/release/ucp
+brew install ollama poppler
+ollama serve &              # or use the menu-bar app
+ollama pull nomic-embed-text
+# Optional, for `ucp-local ask`:  ollama pull llama3.2
 ```
 
-Optional: `cargo install --path .` to put it on your PATH.
+### Linux (Debian/Ubuntu)
+
+```bash
+sudo apt install poppler-utils
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull nomic-embed-text
+# Optional, for `ucp-local ask`:  ollama pull llama3.2
+```
+
+### Linux (Fedora/RHEL)
+
+```bash
+sudo dnf install poppler-utils
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull nomic-embed-text
+```
+
+### Windows
+
+```powershell
+choco install poppler ollama   # or install each manually
+ollama pull nomic-embed-text
+```
+
+Rust (stable, edition 2024) is needed only to build from source. If you install a pre-built UCP binary, skip the Rust install.
+
+> **Poppler is optional but recommended.** Without it, UCP only uses the bundled `pdf-extract` for PDFs, which struggles with PDFs whose body fonts lack a ToUnicode CMap (you'll see headings extract but body text go missing). With `pdftotext` from Poppler on PATH, UCP falls back to it automatically.
+
+## Install
+
+> **Note on the name.** The crate is published as **`ucp-local`** on crates.io (the bare `ucp` name was taken). The binary itself is still called **`ucp`** — that's what you type on the command line — and the library is still imported as `use ucp::...`. Only the install command uses the longer name.
+
+### From crates.io (once published)
+
+```bash
+cargo install ucp-local
+# Puts the `ucp-local` binary on your PATH
+```
+
+### From source
+
+```bash
+git clone <repo-url> ucp-local
+cd ucp-local
+cargo build --release
+# Binary at target/release/ucp-local
+cargo install --path .   # optional, to put `ucp-local` on your PATH
+```
 
 ## Usage
 
 ```bash
-# Index a folder
-ucp index ~/Documents/notes
+# Index one folder
+ucp-local index ~/Documents/notes
+
+# Index multiple folders into the same store
+ucp-local index ~/Documents/notes ~/code/my-project ~/research
 
 # Watch a folder and re-index on changes (initial pass runs first)
-ucp watch ~/code/my-project
+ucp-local watch ~/code/my-project
+
+# Clear the index — soft (keeps the embedding cache so re-index is fast)
+ucp-local clear
+
+# Clear only one folder's chunks
+ucp-local clear ~/Documents/notes
+
+# Hard reset — also wipes the embedding cache, forces re-embed on next index
+ucp-local clear --hard --yes
 
 # Ingest a Claude conversations.json export
-ucp ingest-conversations ~/Downloads/claude-export/conversations.json
+ucp-local ingest-conversations ~/Downloads/claude-export/conversations.json
 
 # Show config + index status
-ucp status
+ucp-local status
 
 # Run the MCP server over stdio (this is what MCP clients launch)
-ucp serve
+ucp-local serve
+
+# Search the index from the terminal (no LLM) — best for debugging "did indexing actually capture this?"
+ucp-local search "your query here"
+ucp-local search "rate limiting" --folder ~/code/my-project --limit 10
+
+# Ask a question — runs search internally, then a local chat model answers with citations
+ucp-local ask "what does the rate limiter do when a token bucket runs out?"
+ucp-local ask "summarize my Q3 plan" --model qwen2.5
 ```
 
 ### Wire up Claude Desktop
@@ -67,8 +132,8 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 ```json
 {
   "mcpServers": {
-    "ucp": {
-      "command": "/full/path/to/ucp",
+    "ucp-local": {
+      "command": "/full/path/to/ucp-local",
       "args": ["serve"]
     }
   }
@@ -79,7 +144,7 @@ Restart Claude Desktop. The `search_local_context` tool will be available — as
 
 ## Config
 
-`~/.config/ucp/config.toml` (or the platform equivalent — `ucp status` prints the resolved path). All fields optional; defaults shown:
+`~/.config/ucp/config.toml` (or the platform equivalent — `ucp-local status` prints the resolved path). All fields optional; defaults shown:
 
 ```toml
 [ollama]
@@ -115,10 +180,10 @@ See [CLAUDE.md](CLAUDE.md) for the developer-facing architecture summary, and [U
 ## Development
 
 ```bash
-cargo test                    # all 75+ tests
+cargo test                    # full test suite
 cargo test --lib ingestion    # one module
 cargo run -- index <path>     # iterate against the dev build
-RUST_LOG=ucp=info cargo run -- watch <path>   # verbose
+RUST_LOG=ucp_local=info cargo run -- watch <path>   # verbose
 ```
 
 ## License

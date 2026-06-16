@@ -7,15 +7,15 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-const DEBOUNCE_MS: u64 = 500;
-
 /// Watch `root` recursively; re-index supported files as they change. Runs
-/// until the underlying watcher is dropped or the channel closes.
+/// until the underlying watcher is dropped or the channel closes. `debounce_ms`
+/// controls how long we batch events before processing (config: `watcher.debounce_ms`).
 pub async fn watch_folder<E: Embedder>(
     root: &Path,
     store: &mut VectorStore,
     embedder: &E,
     opts: &IndexOptions,
+    debounce_ms: u64,
 ) -> Result<()> {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Event>();
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<Event>| {
@@ -28,7 +28,7 @@ pub async fn watch_folder<E: Embedder>(
 
     while let Some(first) = rx.recv().await {
         let mut events = vec![first];
-        let deadline = tokio::time::Instant::now() + Duration::from_millis(DEBOUNCE_MS);
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(debounce_ms);
         loop {
             match tokio::time::timeout_at(deadline, rx.recv()).await {
                 Ok(Some(ev)) => events.push(ev),
@@ -89,7 +89,7 @@ async fn apply_changes<E: Embedder>(
             continue;
         }
         let mut stats = IndexStats::default();
-        match indexer::index_one_file(path, store, embedder, opts, &mut stats).await {
+        match indexer::index_one_file(path, store, embedder, opts, &mut stats, None).await {
             Ok(()) => tracing::info!(path = %path.display(), chunks = stats.chunks_inserted, "re-indexed"),
             Err(e) => tracing::warn!(path = %path.display(), error = %e, "re-index failed"),
         }

@@ -161,7 +161,7 @@ async fn write_line<W: AsyncWriteExt + Unpin>(out: &mut W, value: &Value) -> Res
 mod tests {
     use super::*;
     use crate::ingestion::{Chunk, ChunkSource};
-    use crate::storage::EMBEDDING_DIM;
+    use crate::storage::DEFAULT_EMBEDDING_DIM;
     use async_trait::async_trait;
     use std::path::Path;
 
@@ -170,7 +170,7 @@ mod tests {
     #[async_trait]
     impl Embedder for StubEmbedder {
         async fn embed(&self, _text: &str) -> Result<Vec<f32>> {
-            let mut v = vec![0.0f32; EMBEDDING_DIM];
+            let mut v = vec![0.0f32; DEFAULT_EMBEDDING_DIM];
             v[0] = 1.0;
             Ok(v)
         }
@@ -193,7 +193,7 @@ mod tests {
                     end_line: i + 1,
                 },
             };
-            let mut emb = vec![0.0f32; EMBEDDING_DIM];
+            let mut emb = vec![0.0f32; DEFAULT_EMBEDDING_DIM];
             emb[i] = 1.0;
             store.insert_chunk(&chunk, &[i as u8; 32], &emb, 0).unwrap();
         }

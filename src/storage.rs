@@ -4,7 +4,10 @@ use rusqlite::{params, Connection};
 use std::path::{Path, PathBuf};
 use std::sync::Once;
 
-pub const EMBEDDING_DIM: usize = 768; // nomic-embed-text
+/// Default embedding dimension — matches `nomic-embed-text`. The actual
+/// dimension is per-store (set from config); this constant exists so tests
+/// and `VectorStore::open_in_memory()` have a sensible fallback.
+pub const DEFAULT_EMBEDDING_DIM: usize = 768;
 
 #[derive(Debug, Clone)]
 pub struct MatchedChunk {
@@ -16,18 +19,24 @@ pub struct MatchedChunk {
 
 pub struct VectorStore {
     conn: Connection,
+    embedding_dim: usize,
 }
 
 impl VectorStore {
+    /// In-memory store using the default embedding dimension. Convenience for tests.
     pub fn open_in_memory() -> Result<Self> {
+        Self::open_in_memory_with_dim(DEFAULT_EMBEDDING_DIM)
+    }
+
+    pub fn open_in_memory_with_dim(embedding_dim: usize) -> Result<Self> {
         register_vec_extension();
         let conn = Connection::open_in_memory().context("opening in-memory sqlite")?;
-        let store = Self { conn };
+        let store = Self { conn, embedding_dim };
         store.initialize_schema()?;
         Ok(store)
     }
 
-    pub fn open(path: &Path) -> Result<Self> {
+    pub fn open(path: &Path, embedding_dim: usize) -> Result<Self> {
         register_vec_extension();
         if let Some(parent) = path.parent() {
             if !parent.as_os_str().is_empty() {
@@ -36,9 +45,13 @@ impl VectorStore {
             }
         }
         let conn = Connection::open(path).with_context(|| format!("opening {}", path.display()))?;
-        let store = Self { conn };
+        let store = Self { conn, embedding_dim };
         store.initialize_schema()?;
         Ok(store)
+    }
+
+    pub fn embedding_dim(&self) -> usize {
+        self.embedding_dim
     }
 
     fn initialize_schema(&self) -> Result<()> {
@@ -84,7 +97,7 @@ impl VectorStore {
                 DELETE FROM vec_chunks WHERE chunk_id = old.id;
             END;
             "#,
-            dim = EMBEDDING_DIM
+            dim = self.embedding_dim
         ))
         .context("initializing schema")?;
         Ok(())
@@ -100,11 +113,11 @@ impl VectorStore {
         embedding: &[f32],
         mtime: i64,
     ) -> Result<i64> {
-        if embedding.len() != EMBEDDING_DIM {
+        if embedding.len() != self.embedding_dim {
             anyhow::bail!(
                 "embedding dimension mismatch: got {}, expected {}",
                 embedding.len(),
-                EMBEDDING_DIM
+                self.embedding_dim
             );
         }
         let tx = self.conn.transaction()?;
@@ -157,6 +170,42 @@ impl VectorStore {
         Ok(n)
     }
 
+    /// Delete every chunk whose file_path starts with `prefix`. Used for
+    /// scoped clears: `ucp clear ~/notes` wipes everything indexed from there
+    /// without touching other indexed folders.
+    pub fn delete_chunks_under(&mut self, prefix: &Path) -> Result<usize> {
+        let mut p = prefix.to_string_lossy().into_owned();
+        if !p.ends_with('/') {
+            p.push('/');
+        }
+        let like = format!("{p}%");
+        let exact = prefix.to_string_lossy().into_owned();
+        let n = self.conn.execute(
+            "DELETE FROM chunks WHERE file_path = ?1 OR file_path LIKE ?2",
+            params![exact, like],
+        )?;
+        Ok(n)
+    }
+
+    /// Drop every chunk from the index. Cascades to vec_chunks and fts_chunks
+    /// via triggers. Preserves the embeddings_cache table so re-indexing the
+    /// same content is fast.
+    pub fn clear_chunks(&mut self) -> Result<usize> {
+        let n = self.conn.execute("DELETE FROM chunks", [])?;
+        Ok(n)
+    }
+
+    /// Drop the embedding cache entirely. Use for a hard reset; the next
+    /// index pass will re-embed every chunk via Ollama.
+    pub fn clear_embeddings_cache(&mut self) -> Result<usize> {
+        let n = self.conn.execute("DELETE FROM embeddings_cache", [])?;
+        Ok(n)
+    }
+
+    pub fn embeddings_cache_count(&self) -> Result<i64> {
+        Ok(self.conn.query_row("SELECT COUNT(*) FROM embeddings_cache", [], |r| r.get(0))?)
+    }
+
     pub fn chunk_count(&self) -> Result<i64> {
         Ok(self.conn.query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0))?)
     }
@@ -169,11 +218,11 @@ impl VectorStore {
         limit: usize,
         folder_filter: Option<&Path>,
     ) -> Result<Vec<MatchedChunk>> {
-        if query_embedding.len() != EMBEDDING_DIM {
+        if query_embedding.len() != self.embedding_dim {
             anyhow::bail!(
                 "query embedding dimension mismatch: got {}, expected {}",
                 query_embedding.len(),
-                EMBEDDING_DIM
+                self.embedding_dim
             );
         }
         let fetch = (limit * 4).max(20);
@@ -335,9 +384,9 @@ mod tests {
     use super::*;
 
     fn mock_embedding(seed: usize) -> Vec<f32> {
-        let mut v = vec![0.0f32; EMBEDDING_DIM];
+        let mut v = vec![0.0f32; DEFAULT_EMBEDDING_DIM];
         // Place a strong positive at index `seed` so vectors are linearly separable.
-        v[seed % EMBEDDING_DIM] = 1.0;
+        v[seed % DEFAULT_EMBEDDING_DIM] = 1.0;
         v
     }
 
@@ -382,7 +431,7 @@ mod tests {
         let hit = store.find_cached_embedding(&hash).unwrap();
         assert!(hit.is_some());
         let cached = hit.unwrap();
-        assert_eq!(cached.len(), EMBEDDING_DIM);
+        assert_eq!(cached.len(), DEFAULT_EMBEDDING_DIM);
         assert_eq!(cached[11], 1.0);
 
         let miss = store.find_cached_embedding(&[0u8; 32]).unwrap();
@@ -469,6 +518,64 @@ mod tests {
         let top = &hits[0];
         assert!(top.text.contains("Hogwarts"));
         assert!(top.mtime >= 1_700_000_000);
+    }
+
+    #[test]
+    fn clear_chunks_wipes_chunks_but_keeps_cache() {
+        let mut store = VectorStore::open_in_memory().unwrap();
+        store
+            .insert_chunk(&make_chunk("/a.md", 1, 1, "x"), &[1u8; 32], &mock_embedding(1), 0)
+            .unwrap();
+        store
+            .insert_chunk(&make_chunk("/b.md", 1, 1, "y"), &[2u8; 32], &mock_embedding(2), 0)
+            .unwrap();
+        assert_eq!(store.chunk_count().unwrap(), 2);
+        assert_eq!(store.embeddings_cache_count().unwrap(), 2);
+
+        let n = store.clear_chunks().unwrap();
+        assert_eq!(n, 2);
+        assert_eq!(store.chunk_count().unwrap(), 0);
+        // Embedding cache survives a soft clear.
+        assert_eq!(store.embeddings_cache_count().unwrap(), 2);
+    }
+
+    #[test]
+    fn clear_embeddings_cache_drops_cache() {
+        let mut store = VectorStore::open_in_memory().unwrap();
+        store
+            .insert_chunk(&make_chunk("/a.md", 1, 1, "x"), &[1u8; 32], &mock_embedding(1), 0)
+            .unwrap();
+        store.clear_chunks().unwrap();
+        assert_eq!(store.embeddings_cache_count().unwrap(), 1);
+        store.clear_embeddings_cache().unwrap();
+        assert_eq!(store.embeddings_cache_count().unwrap(), 0);
+    }
+
+    #[test]
+    fn delete_chunks_under_only_removes_matching_prefix() {
+        let mut store = VectorStore::open_in_memory().unwrap();
+        for (i, path) in [
+            "/notes/a.md",
+            "/notes/sub/b.md",
+            "/code/x.rs",
+            "/notes-other/c.md",
+        ]
+        .iter()
+        .enumerate()
+        {
+            store
+                .insert_chunk(
+                    &make_chunk(path, 1, 1, "t"),
+                    &[i as u8; 32],
+                    &mock_embedding(i),
+                    0,
+                )
+                .unwrap();
+        }
+        let n = store.delete_chunks_under(Path::new("/notes")).unwrap();
+        // /notes/a.md and /notes/sub/b.md should go; /notes-other/c.md must NOT.
+        assert_eq!(n, 2);
+        assert_eq!(store.chunk_count().unwrap(), 2);
     }
 
     #[test]
