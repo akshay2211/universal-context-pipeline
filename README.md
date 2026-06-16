@@ -20,9 +20,21 @@ Paired with a local model in LM Studio (or Ollama via `ucp-local ask`), the whol
 
 ![Quick start demo](demo/quick-start.gif)
 
+## Who is this for?
+
+| If you are… | UCP gives you… |
+|---|---|
+| A **Claude / Cursor / LM Studio power user** | A searchable archive of every past AI conversation, callable from any future session as the `search_local_context` tool. |
+| A **software engineer** | Code + private docs + sibling repos + past Claude chats unified under one MCP tool — surfaced inside Cursor or Claude Code alongside their native indexers. |
+| A **researcher, writer, or academic** | A PDF + notes corpus you can ask grounded questions against, with line-level citations, without anything leaving the machine. |
+| In a **privacy-regulated workflow** (legal, medical, defense, NDA-bound IP) | A single Rust binary with zero telemetry and zero cloud. Pair with LM Studio for a fully offline, end-to-end RAG stack. |
+| A **solo founder or consultant** | Per-folder client isolation via `folder_filter` — no risk of leaking client A's context into client B's session. |
+
+Full audience analysis, competitive comparison, and the two wedges UCP is explicitly built to win on: see [POSITIONING.md](POSITIONING.md).
+
 ## Status
 
-v0.1, headless. Track scope in [ROADMAP.md](ROADMAP.md). Who this is for and how it compares to existing tools: [POSITIONING.md](POSITIONING.md).
+v0.1, headless. Track scope in [ROADMAP.md](ROADMAP.md).
 
 What ships:
 

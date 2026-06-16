@@ -10,10 +10,10 @@ For build scope see [ROADMAP.md](ROADMAP.md). For developer-facing architecture 
 
 UCP's two strongest wedges:
 
-1. **Privacy-regulated workflows** — legal, medical, defense, NDA-bound IP. A single Rust binary, zero telemetry, zero cloud. The existing self-hosted alternatives (PrivateGPT, AnythingLLM) work but are heavy and friction-laden.
-2. **Conversation memory for AI power users** — every past Claude session becomes searchable across every future session. Nothing else in the AI tools landscape ships this cleanly.
+1. **Privacy-regulated workflows** — legal, medical, defense, NDA-bound IP. A single Rust binary, zero telemetry, zero cloud. The existing self-hosted alternatives (PrivateGPT, AnythingLLM) work but are heavy and friction-laden. Pair UCP with LM Studio (or Ollama via `ucp-local ask`) and the whole stack — index, embeddings, retrieval, chat model — runs fully offline.
+2. **Conversation memory for AI power users** — every past Claude session becomes searchable across every future session, in *any* MCP client (Claude Desktop, Cursor, LM Studio, Zed, Continue.dev, custom agents). Nothing else in the AI tools landscape ships this cleanly.
 
-Everywhere else there's a "good enough" cloud or local alternative. Don't try to win on code-only (Cursor does it better) or on researcher UX (NotebookLM does it better). Win on the gaps.
+Everywhere else there's a "good enough" cloud or local alternative. Don't try to win on code-only as a standalone tool (Cursor does it better) or on researcher UX (NotebookLM does it better). Win on the gaps — and on being a complement that *runs inside* Cursor / Claude / LM Studio rather than competing with them.
 
 ---
 
@@ -100,7 +100,8 @@ No cloud tool ships this. Structural advantage of being local-first.
 - **Background-indexing daemon:** `ucp-local watch ~/notes` runs continuously, index stays fresh.
 - **Per-project context:** one folder = one project = one filtered slice via `folder_filter`.
 - **Growing memory:** monthly Claude export → `ucp-local ingest-conversations`. Personal memory compounds.
-- **Air-gap mode:** Ollama + UCP, no internet. Useful for flights, secure facilities, paranoid setups.
+- **Air-gap mode:** UCP + a local chat runtime (LM Studio or Ollama), no internet. Useful for flights, secure facilities, classified work, paranoid setups. Indexing, embeddings, retrieval, and the chat model all run on-device.
+- **Multi-client memory:** index once, query from Claude Desktop *and* Cursor *and* LM Studio. The index is a shared substrate; the client is whichever LLM you prefer for the task.
 
 ---
 
@@ -108,11 +109,12 @@ No cloud tool ships this. Structural advantage of being local-first.
 
 | Audience | One-line pitch |
 |---|---|
-| Engineers | "Grep + semantic search across your code, docs, and past Claude chats — fed straight into Claude Desktop or Cursor." |
-| Researchers | "Drop a folder of PDFs in. Ask Claude about them with citations. Nothing leaves your machine." |
+| Engineers | "Grep + semantic search across your code, docs, and past Claude chats — fed straight into Claude Desktop, Cursor, or whichever MCP client you live in." |
+| Researchers | "Drop a folder of PDFs in. Ask Claude (or a local model in LM Studio) about them with citations. Nothing leaves your machine." |
 | Writers | "A research assistant grounded in your own notes and sources, with privacy guaranteed." |
-| Privacy-sensitive | "Local-first LLM grounding. Zero telemetry. Zero cloud. Single binary." |
-| Power users | "Your past Claude conversations become searchable memory across every future Claude session." |
+| Privacy-sensitive | "Local-first LLM grounding. Pair with LM Studio for a fully offline stack — index, embeddings, retrieval, and chat model all on-device. Zero telemetry. Single binary." |
+| Power users | "Your past Claude conversations become searchable memory across every future session, in every MCP client you use." |
+| Offline / air-gap users | "Index, retrieve, and chat without an internet connection. UCP + LM Studio = end-to-end RAG on a laptop in airplane mode." |
 
 ---
 
@@ -122,10 +124,10 @@ Honest evaluation. Some rows admit UCP isn't materially better — that's delibe
 
 | Audience | Strongest existing options | What UCP genuinely adds | Is UCP actually better? |
 |---|---|---|---|
-| **Software engineers** | Cursor `@codebase`, Continue.dev, Claude Code, Sourcegraph Cody ($), Aider | Cross-source unification: code + docs + past Claude chats in one query. None touch conversation memory. | **Partially.** For code-only Cursor / Claude Code win. UCP edges them out only when you want past-conversation context too. |
+| **Software engineers** | Cursor `@codebase`, Continue.dev, Claude Code, Sourcegraph Cody ($), Aider | Cross-source unification: code + docs + past Claude chats in one query, surfaced *inside* Cursor / Claude / LM Studio via MCP. None of them touch conversation memory or cross-repo notes natively. | **Partially.** For code-only inside one repo Cursor / Claude Code win. UCP isn't a replacement — it's an MCP add-on that extends Cursor's reach into private notes, sibling repos, and past Claude history. |
 | **Researchers / academics** | **NotebookLM** (free, polished), Khoj, AnythingLLM, ChatGPT w/ file upload, Obsidian + Smart Connections | True local-only. NotebookLM uploads to Google. Khoj is the closest match. | **Only if privacy matters.** NotebookLM is excellent for cloud-OK users. UCP wins on regulated / embargoed material. |
 | **Writers & journalists** | Manual paste into Claude/ChatGPT, Sudowrite ($), Lex.page, NotebookLM, Scrivener (no AI) | Confidential source material never transits. Citations preserve provenance. | **Yes, for sensitive sources.** For non-sensitive writing, ChatGPT + upload is faster. |
-| **Privacy-sensitive / regulated** | Self-hosted LLM (LM Studio + Ollama, no retrieval), AnythingLLM (local mode), PrivateGPT, LibreChat + local model, on-prem Cohere / Bedrock-VPC ($$$) | Single binary, zero config, zero telemetry, MCP-native. Existing locals are clunky to set up. | **Yes, materially.** UCP's strongest audience. |
+| **Privacy-sensitive / regulated** | Self-hosted LLM (LM Studio or Ollama, no retrieval out of the box), AnythingLLM (local mode), PrivateGPT, LibreChat + local model, on-prem Cohere / Bedrock-VPC ($$$) | Single binary, zero config, zero telemetry, MCP-native. Plugs straight into LM Studio's MCP support to give it real RAG without bolting on a vector DB. Existing locals are clunky to set up. | **Yes, materially.** UCP's strongest audience — and the LM-Studio-as-host pattern means the chat model stays local too. |
 | **Solo founders / consultants** | Notion AI, Mem.ai, Reflect, Apple Notes + manual copy-paste | Per-folder scoping enforces client isolation. No risk of leaking client A into client B. | **Yes if client confidentiality is real.** Notion AI wins on UX otherwise. |
 | **Educators & students** | **NotebookLM** (free, purpose-built), Khanmigo, ChatGPT w/ uploaded PDFs | Local-only means no per-student account, no upload limits. | **No, honestly.** NotebookLM is engineered for this. UCP only wins if school IT bans cloud. |
 | **OSS maintainers** | DeepWiki (auto-AI-docs from repos), Cody, Sourcegraph, Mintlify | Self-hostable Q&A grounded in your repo. No vendor lock-in. | **Equal.** DeepWiki has more momentum; UCP wins on full self-host. |
@@ -137,9 +139,10 @@ Honest evaluation. Some rows admit UCP isn't materially better — that's delibe
 
 1. **Two genuine wedges:** privacy-regulated workflows + conversation memory for power users. Everywhere else has a "good enough" alternative.
 2. **Don't try to outcompete NotebookLM head-on.** For cloud-OK researchers / students, recommend NotebookLM, not UCP.
-3. **Don't try to outcompete Cursor on code-only.** UCP for engineers wins on *combination* (code + docs + Claude chats), not on code alone.
+3. **Don't try to outcompete Cursor on code-only.** UCP for engineers wins on *combination* (code + docs + Claude chats), not on code alone — and it wins from *inside* Cursor as an MCP server, not as a replacement.
 4. **Lead the launch with conversation memory.** Most underbuilt thing in the AI tools landscape. "Your Claude chats become a searchable second brain across every future session" is a story nobody else can tell.
-5. **Privacy is the most defensible long-term wedge.** Regulated industries can't move to cloud; existing self-hosted options are heavy compared to a single Rust binary.
+5. **Privacy is the most defensible long-term wedge.** Regulated industries can't move to cloud; existing self-hosted options are heavy compared to a single Rust binary. The LM Studio pairing makes "fully offline, end-to-end RAG" a one-paragraph install — that's a unique pitch.
+6. **Be a complement, not a competitor.** UCP runs *inside* Claude Desktop, Cursor, and LM Studio via MCP. Framing it as an add-on that extends tools users already love is structurally easier to sell than framing it as a replacement.
 
 ---
 
