@@ -1,19 +1,78 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 
+#[async_trait]
+pub trait Embedder: Send + Sync {
+    async fn embed(&self, text: &str) -> Result<Vec<f32>>;
+}
+
+#[async_trait]
+impl Embedder for OllamaClient {
+    async fn embed(&self, text: &str) -> Result<Vec<f32>> {
+        OllamaClient::embed(self, text).await
+    }
+}
+
+#[derive(Clone)]
 pub struct OllamaClient {
-    // TODO Week 2: reqwest::Client + host + model name.
-    _private: (),
+    host: String,
+    model: String,
+    client: reqwest::Client,
 }
 
 impl OllamaClient {
-    pub fn new(_host: &str, _model: &str) -> Self {
-        todo!("ollama client — add reqwest")
+    pub fn new(host: impl Into<String>, model: impl Into<String>) -> Self {
+        Self {
+            host: host.into().trim_end_matches('/').to_string(),
+            model: model.into(),
+            client: reqwest::Client::new(),
+        }
     }
 
-    pub async fn embed(&self, _text: &str) -> Result<Vec<f32>> {
-        // TODO Week 2: POST {host}/api/embeddings, return data["embedding"].
-        todo!("embed via ollama")
+    pub fn default_local() -> Self {
+        Self::new("http://localhost:11434", "nomic-embed-text")
     }
+
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+
+    pub async fn embed(&self, text: &str) -> Result<Vec<f32>> {
+        let url = format!("{}/api/embeddings", self.host);
+        let body = EmbeddingRequest { model: &self.model, prompt: text };
+
+        let res = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .with_context(|| format!("POST {url}"))?;
+
+        if !res.status().is_success() {
+            let status = res.status();
+            let text = res.text().await.unwrap_or_default();
+            anyhow::bail!("ollama {status}: {text}");
+        }
+
+        let parsed: EmbeddingResponse = res
+            .json()
+            .await
+            .context("decoding ollama embeddings response")?;
+        Ok(parsed.embedding)
+    }
+}
+
+#[derive(Serialize)]
+struct EmbeddingRequest<'a> {
+    model: &'a str,
+    prompt: &'a str,
+}
+
+#[derive(Deserialize)]
+struct EmbeddingResponse {
+    embedding: Vec<f32>,
 }
 
 /// SHA-256 content-hash → embedding cache. Avoids re-embedding unchanged chunks
@@ -82,5 +141,25 @@ mod tests {
         let a = EmbeddingCache::hash("hello world");
         let b = EmbeddingCache::hash("hello there");
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn ollama_client_normalizes_host_and_constructs_payload() {
+        // Exercises the constructor path and the request body shape without making a network call.
+        let client = OllamaClient::new("http://localhost:11434/", "nomic-embed-text");
+        assert_eq!(client.host, "http://localhost:11434");
+        assert_eq!(client.model, "nomic-embed-text");
+
+        let body = EmbeddingRequest { model: client.model(), prompt: "hello" };
+        let json = serde_json::to_string(&body).unwrap();
+        assert!(json.contains("\"model\":\"nomic-embed-text\""));
+        assert!(json.contains("\"prompt\":\"hello\""));
+    }
+
+    #[test]
+    fn ollama_client_default_local_uses_localhost() {
+        let client = OllamaClient::default_local();
+        assert_eq!(client.host, "http://localhost:11434");
+        assert_eq!(client.model, "nomic-embed-text");
     }
 }

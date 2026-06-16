@@ -11,7 +11,7 @@ Living document. Source of truth for what v0.1 ships and what waits. Supersedes 
 | Area | Detail |
 |---|---|
 | Crate shape | Single crate `ucp`, headless binary + lib. No workspace, no Tauri. |
-| Ingestion | `.md`, `.txt`, `.pdf` (via `pdf-extract`/`lopdf`), source files. No OCR. |
+| Ingestion | `.md`, `.txt`, `.pdf` (via `pdf-extract`, flat text — no page-aware citations yet), source files. No OCR. |
 | Chunking — prose | Sentence-bounded via `tiktoken-rs` cl100k, configurable max_tokens + overlap. |
 | Chunking — code | Tree-sitter: chunk by function/class/impl-block for `.rs`/`.py`/`.ts`/`.go`. |
 | PII masking | Email + API-key regex. **No phone regex** (false positives). `--no-mask` flag. |
@@ -64,6 +64,11 @@ The full evaluation that produced the v0.1 scope. Use when prioritizing future w
 - Time-decay scoring (boost recent files).
 - Privacy tags (secret/internal/public per folder, MCP tool refuses to surface secret content unless explicitly asked).
 - Multiple embedding models in one DB (different models per content type).
+- **Page-aware PDF citations.** Currently PDFs are extracted as flat text with line numbers referring to the plaintext. Better: per-page chunks with `[file.pdf:page 3]` citations. Needs lower-level pdf-extract usage (PlainTextOutput) or switching to `lopdf` directly.
+- **Image ingestion.** Three candidate paths (ROADMAP entry):
+  - OCR on screenshots/scans via `tesseract` (adds a system dep).
+  - Local vision-LM captions via `ollama pull llava` — same Ollama runtime, no new system deps.
+  - CLIP-style multimodal embeddings (best UX, needs separate vector pipeline).
 
 ### Deferred from original spec (may never ship)
 

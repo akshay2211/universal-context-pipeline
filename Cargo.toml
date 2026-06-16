@@ -33,7 +33,17 @@ tree-sitter-rust = "0.21"
 tree-sitter-python = "0.21"
 tree-sitter-typescript = "0.21"
 
-# Added module-by-module as implementation lands. Tracked in ROADMAP.md.
-# Week 1 (remaining): walkdir, pdf-extract
-# Week 2: rusqlite (bundled), sqlite-vec, reqwest, rmcp
-# Week 3: notify
+# Week 2
+rusqlite = { version = "0.31", features = ["bundled", "load_extension"] }
+sqlite-vec = "0.1"
+bytemuck = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+async-trait = "0.1"
+walkdir = "2"
+pdf-extract = "0.7"
+
+# Week 3
+notify = "6"
+
+[dev-dependencies]
+tempfile = "3"

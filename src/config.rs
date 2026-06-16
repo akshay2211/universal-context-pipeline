@@ -51,9 +51,16 @@ impl Default for Config {
 }
 
 impl Config {
+    fn dirs() -> Result<ProjectDirs> {
+        ProjectDirs::from("io", "ucp", "ucp").context("could not resolve user dirs")
+    }
+
     pub fn config_path() -> Result<PathBuf> {
-        let dirs = ProjectDirs::from("io", "ucp", "ucp").context("could not resolve config dir")?;
-        Ok(dirs.config_dir().join("config.toml"))
+        Ok(Self::dirs()?.config_dir().join("config.toml"))
+    }
+
+    pub fn data_path() -> Result<PathBuf> {
+        Ok(Self::dirs()?.data_dir().join("index.sqlite"))
     }
 
     pub fn load() -> Result<Self> {

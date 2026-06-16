@@ -1,5 +1,6 @@
 pub mod config;
 pub mod embeddings;
+pub mod indexer;
 pub mod ingestion;
 pub mod mcp;
 pub mod storage;
