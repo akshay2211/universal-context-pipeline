@@ -2,7 +2,23 @@
 
 A local-first MCP server that grounds LLMs in your own files.
 
-UCP indexes folders on your machine — notes, code, conversation exports — and exposes them to any MCP-compatible client (Claude Desktop, Cursor, etc.) as a single tool: `search_local_context`. Hybrid retrieval (BM25 + vector), tree-sitter-aware code chunking, full citations, content-hash embedding cache. Single binary. No telemetry. No cloud.
+UCP indexes folders on your machine — notes, code, conversation exports — and exposes them to any MCP-compatible client (Claude Desktop, Cursor, LM Studio, and other local-agent runtimes) as a single tool: `search_local_context`. Hybrid retrieval (BM25 + vector), tree-sitter-aware code chunking, full citations, content-hash embedding cache. Single binary. No telemetry. No cloud.
+
+Paired with a local model in LM Studio (or Ollama via `ucp-local ask`), the whole stack — indexing, embeddings, retrieval, and the chat model — runs fully offline. Works on a plane, in an air-gapped facility, or anywhere a cloud LLM isn't an option.
+
+## Demos
+
+**Conversation memory — make every past Claude chat searchable across every future session.**
+
+![Conversation memory demo](demo/conversation-memory.gif)
+
+**Air-gap RAG — local Ollama + local index, zero network traffic.**
+
+![Air-gap RAG demo](demo/air-gap-rag.gif)
+
+**Quick start — install, index, ask, in under a minute.**
+
+![Quick start demo](demo/quick-start.gif)
 
 ## Status
 
@@ -125,9 +141,13 @@ ucp-local ask "what does the rate limiter do when a token bucket runs out?"
 ucp-local ask "summarize my Q3 plan" --model qwen2.5
 ```
 
-### Wire up Claude Desktop
+### Wire up an MCP client
 
-Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
+UCP speaks MCP over stdio, so any client that launches MCP servers can use it. Same `serve` command, different config file per client.
+
+#### Claude Desktop
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS (`%APPDATA%\Claude\claude_desktop_config.json` on Windows):
 
 ```json
 {
@@ -141,6 +161,44 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 ```
 
 Restart Claude Desktop. The `search_local_context` tool will be available — ask something grounded in your indexed files and it'll cite them inline.
+
+#### Cursor
+
+Cursor reads MCP servers from `~/.cursor/mcp.json` (or per-project `.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "ucp-local": {
+      "command": "/full/path/to/ucp-local",
+      "args": ["serve"]
+    }
+  }
+}
+```
+
+Reload Cursor. The chat sidebar will surface `search_local_context` as a tool — useful for grounding the agent in repos and docs Cursor's own `@codebase` indexer can't reach (private notes, conversation history, sibling repos).
+
+#### LM Studio (fully offline)
+
+LM Studio 0.3.17+ supports MCP. Open the chat settings, find the **MCP servers** section, and add:
+
+```json
+{
+  "mcpServers": {
+    "ucp-local": {
+      "command": "/full/path/to/ucp-local",
+      "args": ["serve"]
+    }
+  }
+}
+```
+
+Pair UCP with any local model you've downloaded in LM Studio (Llama, Qwen, Mistral, etc.). Now your indexing, embeddings, retrieval, and chat model all run on the same machine — no cloud, no network — and the LLM can still call `search_local_context` to ground its answers in your files.
+
+#### Other MCP clients
+
+Any client following the MCP spec (Zed, Continue.dev, Goose, custom Agent SDK apps, etc.) takes the same `command` + `args` shape. If your client expects a JSON-RPC stdio server, point it at `ucp-local serve` and you're done.
 
 ## Config
 
@@ -188,4 +246,4 @@ RUST_LOG=ucp_local=info cargo run -- watch <path>   # verbose
 
 ## License
 
-Dual-licensed under MIT or Apache-2.0.
+Under Apache-2.0.
