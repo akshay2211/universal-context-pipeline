@@ -1,5 +1,9 @@
 # UCP — Universal Context Pipeline
 
+[![crates.io](https://img.shields.io/crates/v/ucp-local.svg)](https://crates.io/crates/ucp-local)
+[![docs.rs](https://docs.rs/ucp-local/badge.svg)](https://docs.rs/ucp-local)
+[![license](https://img.shields.io/crates/l/ucp-local.svg)](#license)
+
 A local-first MCP server that grounds LLMs in your own files.
 
 UCP indexes folders on your machine — notes, code, conversation exports — and exposes them to any MCP-compatible client (Claude Desktop, Cursor, LM Studio, and other local-agent runtimes) as a single tool: `search_local_context`. Hybrid retrieval (BM25 + vector), tree-sitter-aware code chunking, full citations, content-hash embedding cache. Single binary. No telemetry. No cloud.
@@ -95,9 +99,9 @@ Rust (stable, edition 2024) is needed only to build from source. If you install 
 
 ## Install
 
-> **Note on the name.** The crate is published as **`ucp-local`** on crates.io (the bare `ucp` name was taken). The binary itself is still called **`ucp`** — that's what you type on the command line — and the library is still imported as `use ucp::...`. Only the install command uses the longer name.
+> **Note on the name.** The crate is published as **`ucp-local`** on crates.io — the bare `ucp` name was taken. The binary on your `PATH` is also `ucp-local` (that's what you type on the command line), and the library is imported as `use ucp_local::...`.
 
-### From crates.io (once published)
+### From crates.io
 
 ```bash
 cargo install ucp-local
@@ -255,6 +259,10 @@ cargo test --lib ingestion    # one module
 cargo run -- index <path>     # iterate against the dev build
 RUST_LOG=ucp_local=info cargo run -- watch <path>   # verbose
 ```
+
+## Changelog
+
+Release history and notes live in [CHANGELOG.md](CHANGELOG.md). The current published version is **0.1.0** ([crates.io](https://crates.io/crates/ucp-local)).
 
 ## License
 
