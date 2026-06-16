@@ -1,0 +1,39 @@
+[package]
+name = "ucp"
+version = "0.1.0"
+edition = "2024"
+description = "Universal Context Pipeline — local-first MCP server for grounding LLMs in your files"
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "ucp"
+path = "src/main.rs"
+
+[lib]
+name = "ucp"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+directories = "5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Week 1
+regex = "1"
+sha2 = "0.10"
+tiktoken-rs = "0.5"
+tree-sitter = "0.22"
+tree-sitter-rust = "0.21"
+tree-sitter-python = "0.21"
+tree-sitter-typescript = "0.21"
+
+# Added module-by-module as implementation lands. Tracked in ROADMAP.md.
+# Week 1 (remaining): walkdir, pdf-extract
+# Week 2: rusqlite (bundled), sqlite-vec, reqwest, rmcp
+# Week 3: notify
