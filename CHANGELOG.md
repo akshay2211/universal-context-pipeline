@@ -72,7 +72,7 @@ Initial public release. First version published to crates.io as `ucp-local`.
 #### Distribution
 
 - Published to crates.io as `ucp-local`.
-- Dual-licensed under MIT or Apache-2.0.
+- Licensed under Apache-2.0.
 - Demo GIFs (conversation memory, air-gap RAG, quick start) embedded in the README.
 - Sample corpus under `samples/` for first-run validation.
 
